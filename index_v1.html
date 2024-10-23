@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<!-- Previous head section remains the same -->
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P Video Streaming</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
+    <script src="https://www.youtube.com/iframe_api"></script>
+    <style>
+        /* Previous styles remain the same */
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+        }
+        .video-section {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .chat-section {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+            height: 600px;
+            display: flex;
+            flex-direction: column;
+        }
+        #messages {
+            flex-grow: 1;
+            overflow-y: auto;
+            margin-bottom: 10px;
+            background: white;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .input-group {
+            margin-bottom: 15px;
+        }
+        input, button {
+            padding: 8px;
+            margin: 5px 0;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+        }
+        #player {
+            width: 100%;
+            max-width: 800px;
+            margin-top: 10px;
+        }
+        .message {
+            margin: 5px 0;
+            padding: 5px;
+            border-radius: 4px;
+            background: #e9ecef;
+        }
+        .status-indicator {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            background: #e9ecef;
+            margin-left: 10px;
+        }
+        .host {
+            background: #28a745;
+            color: white;
+        }
+        .viewer {
+            background: #6c757d;
+            color: white;
+        }
+        .youtube-input {
+            display: none;
+        }
+        .youtube-input.show {
+            display: block;
+        }
+        #player-container {
+            position: relative;
+        }
+        .player-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: transparent;
+            display: none;
+            z-index: 10;
+        }
+        .player-overlay.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="video-section">
+            <h2>P2P Video Streaming</h2>
+            <div class="input-group">
+                <div>
+                    Your ID: <span id="peer-id"></span>
+                    <span id="role-indicator" class="status-indicator"></span>
+                </div>
+                <input type="text" id="peer-id-input" placeholder="Enter peer ID">
+                <button onclick="connectToPeer()">Connect</button>
+            </div>
+            
+            <div class="input-group youtube-input" id="youtube-input">
+                <input type="text" id="youtube-url" placeholder="Enter YouTube URL">
+                <button onclick="loadVideo()">Load Video</button>
+            </div>
+            
+            <div id="player-container">
+                <div id="player"></div>
+                <div id="player-overlay" class="player-overlay"></div>
+            </div>
+        </div>
+        
+        <div class="chat-section">
+            <h2>Chat</h2>
+            <div id="messages"></div>
+            <div class="input-group">
+                <input type="text" id="message-input" placeholder="Type a message...">
+                <button onclick="sendMessage()">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let peer;
+        let connections = [];
+        let player;
+        let isHost = false;
+        let currentVideoId = '';
+        let syncInProgress = false;
+
+        // Initialize PeerJS
+        function initPeer() {
+            peer = new Peer();
+            
+            peer.on('open', (id) => {
+                document.getElementById('peer-id').textContent = id;
+                setAsHost();
+            });
+
+            peer.on('connection', (conn) => {
+                handleConnection(conn);
+            });
+        }
+
+        function setAsHost() {
+            isHost = true;
+            document.getElementById('role-indicator').textContent = 'HOST';
+            document.getElementById('role-indicator').className = 'status-indicator host';
+            document.getElementById('youtube-input').className = 'input-group youtube-input show';
+            document.getElementById('player-overlay').className = 'player-overlay';
+        }
+
+        function setAsViewer() {
+            isHost = false;
+            document.getElementById('role-indicator').textContent = 'VIEWER';
+            document.getElementById('role-indicator').className = 'status-indicator viewer';
+            document.getElementById('youtube-input').className = 'input-group youtube-input';
+            document.getElementById('player-overlay').className = 'player-overlay active';
+        }
+
+        function onYouTubeIframeAPIReady() {
+            player = new YT.Player('player', {
+                height: '450',
+                width: '100%',
+                videoId: '',
+                playerVars: {
+                    'playsinline': 1,
+                    'enablejsapi': 1,
+                    'controls': 1,
+                    'rel': 0
+                },
+                events: {
+                    'onStateChange': onPlayerStateChange,
+                    'onReady': onPlayerReady
+                }
+            });
+        }
+
+        function onPlayerReady(event) {
+            if (!isHost) {
+                setViewerControls();
+            }
+        }
+
+        function setViewerControls() {
+            const overlay = document.getElementById('player-overlay');
+            overlay.className = 'player-overlay active';
+        }
+
+        function onPlayerStateChange(event) {
+            if (syncInProgress) return;
+            
+            if (isHost) {
+                const state = {
+                    type: 'videoState',
+                    state: event.data,
+                    time: player.getCurrentTime()
+                };
+                
+                connections.forEach(conn => {
+                    conn.send(state);
+                });
+            }
+        }
+
+        function connectToPeer() {
+            const peerId = document.getElementById('peer-id-input').value;
+            if (!peerId) return;
+
+            setAsViewer();
+            const conn = peer.connect(peerId);
+            handleConnection(conn);
+        }
+
+        // Rest of the connection handling code remains the same
+        function handleConnection(conn) {
+            connections.push(conn);
+            
+            conn.on('open', () => {
+                addMessage('System', `Connected to ${conn.peer}`);
+                
+                if (isHost && currentVideoId) {
+                    conn.send({
+                        type: 'video',
+                        videoId: currentVideoId,
+                        time: player.getCurrentTime(),
+                        state: player.getPlayerState()
+                    });
+                }
+            });
+
+            conn.on('data', handleData);
+            
+            conn.on('close', () => {
+                connections = connections.filter(c => c !== conn);
+                addMessage('System', `Disconnected from ${conn.peer}`);
+            });
+        }
+
+        function handleData(data) {
+            if (data.type === 'chat') {
+                addMessage(data.sender, data.message);
+            } else if (data.type === 'video') {
+                loadVideoForPeer(data.videoId, data.time, data.state);
+            } else if (data.type === 'videoState') {
+                syncInProgress = true;
+                updateVideoState(data.state, data.time);
+                setTimeout(() => { syncInProgress = false; }, 500);
+            }
+        }
+
+        function updateVideoState(state, time) {
+            if (!isHost) {
+                if (state === YT.PlayerState.PLAYING) {
+                    player.seekTo(time);
+                    player.playVideo();
+                } else if (state === YT.PlayerState.PAUSED) {
+                    player.seekTo(time);
+                    player.pauseVideo();
+                }
+            }
+        }
+
+        // Chat functionality remains the same
+        function sendMessage() {
+            const input = document.getElementById('message-input');
+            const message = input.value.trim();
+            if (!message) return;
+
+            addMessage('You', message);
+            
+            connections.forEach(conn => {
+                conn.send({
+                    type: 'chat',
+                    sender: peer.id,
+                    message: message
+                });
+            });
+
+            input.value = '';
+        }
+
+        function addMessage(sender, message) {
+            const messagesDiv = document.getElementById('messages');
+            const messageElement = document.createElement('div');
+            messageElement.className = 'message';
+            messageElement.textContent = `${sender}: ${message}`;
+            messagesDiv.appendChild(messageElement);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function loadVideo() {
+            if (!isHost) return;
+            
+            const url = document.getElementById('youtube-url').value;
+            if (!url) return;
+
+            const videoId = extractVideoId(url);
+            if (!videoId) {
+                addMessage('System', 'Invalid YouTube URL');
+                return;
+            }
+
+            currentVideoId = videoId;
+            player.loadVideoById({ videoId: videoId, startSeconds: 0 });
+
+            connections.forEach(conn => {
+                conn.send({
+                    type: 'video',
+                    videoId: videoId,
+                    time: 0,
+                    state: YT.PlayerState.PLAYING
+                });
+            });
+        }
+
+        function loadVideoForPeer(videoId, time, state) {
+            currentVideoId = videoId;
+            syncInProgress = true;
+            player.loadVideoById({
+                videoId: videoId,
+                startSeconds: time
+            });
+            
+            setViewerControls();
+            
+            setTimeout(() => {
+                if (state === YT.PlayerState.PAUSED) {
+                    player.pauseVideo();
+                }
+                syncInProgress = false;
+            }, 500);
+        }
+
+        function extractVideoId(url) {
+            const regExp = /^.*((youtu.be\/)|(v\/)|(\/u\/\w\/)|(embed\/)|(watch\?))\??v?=?([^#&?]*).*/;
+            const match = url.match(regExp);
+            return (match && match[7].length === 11) ? match[7] : null;
+        }
+
+        window.onload = initPeer;
+
+        document.getElementById('message-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>P2P Video Streaming</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
+    <style>
+        .container {
+            display: flex;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .video-section {
+            flex: 2;
+            margin-right: 20px;
+        }
+        .chat-section {
+            flex: 1;
+        }
+        .input-group {
+            margin: 10px 0;
+            display: flex;
+            gap: 10px;
+        }
+        .status-indicator {
+            padding: 3px 8px;
+            border-radius: 4px;
+            background: #eee;
+        }
+        .player-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0,0,0,0.7);
+            color: white;
+        }
+        #messages {
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        #player-container {
+            position: relative;
+            width: 100%;
+            background: #000;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="video-section">
+            <h2>P2P Video Streaming</h2>
+            <div class="input-group">
+                Your ID: <span id="peer-id"></span>
+                <span id="role-indicator" class="status-indicator"></span>
+            </div>
+            <div class="input-group">
+                <input type="text" id="connect-id" placeholder="Enter peer ID">
+                <button onclick="connectToPeer()">Connect</button>
+            </div>
+            <div id="youtube-input" class="input-group">
+                <input type="text" id="video-id" placeholder="Enter YouTube video ID">
+                <button onclick="loadVideo()">Load Video</button>
+            </div>
+            <div id="player-container">
+                <div id="player"></div>
+                <div id="player-overlay" class="player-overlay">
+                    <p>Waiting for video...</p>
+                </div>
+            </div>
+        </div>
+        <div class="chat-section">
+            <h2>Chat</h2>
+            <div id="messages"></div>
+            <div class="input-group">
+                <input type="text" id="message-input" placeholder="Type a message">
+                <button onclick="sendMessage()">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let peer;
+        let connections = new Map(); // Store all peer connections
+        let isHost = false;
+        let hostConnection = null;
+        let messagesSeen = new Set(); // Track message IDs to prevent duplicates
+
+        // Initialize PeerJS
+        function initPeer() {
+            peer = new Peer();
+            
+            peer.on('open', (id) => {
+                document.getElementById('peer-id').textContent = id;
+                updateRoleIndicator();
+            });
+
+            // Handle incoming connections
+            peer.on('connection', (conn) => {
+                setupConnection(conn);
+            });
+        }
+
+        function updateRoleIndicator() {
+            const indicator = document.getElementById('role-indicator');
+            indicator.textContent = isHost ? 'Host' : connections.size > 0 ? 'Connected' : 'Disconnected';
+        }
+
+        function setupConnection(conn) {
+            connections.set(conn.peer, conn);
+            updateRoleIndicator();
+
+            conn.on('data', (data) => {
+                handleIncomingData({...data}, conn.peer); // Clone the data to prevent modification
+            });
+
+            conn.on('close', () => {
+                connections.delete(conn.peer);
+                updateRoleIndicator();
+            });
+        }
+
+        function connectToPeer() {
+            const connectId = document.getElementById('connect-id').value;
+            if (!connectId || connectId === peer.id) return;
+
+            const conn = peer.connect(connectId);
+            conn.on('open', () => {
+                setupConnection(conn);
+                hostConnection = conn;
+                // Request current video state from the peer we're connecting to
+                conn.send({
+                    type: 'request_video_state'
+                });
+            });
+        }
+
+        function handleIncomingData(data, receivedFrom) {
+            // Clone the data to prevent modifications affecting the relay
+            const originalData = JSON.parse(JSON.stringify(data));
+
+            switch(data.type) {
+                case 'chat':
+                    // Check if we've seen this message before
+                    if (!messagesSeen.has(data.messageId)) {
+                        messagesSeen.add(data.messageId);
+                        // Display message with original sender
+                        displayMessage(data.message, data.originalSender);
+                        // Relay the original unchanged message data
+                        relayData(originalData, receivedFrom);
+                    }
+                    break;
+                case 'video_state':
+                    if (data.videoId) {
+                        updateVideoState(data);
+                        relayData(originalData, receivedFrom);
+                    }
+                    break;
+                case 'request_video_state':
+                    if (isHost) {
+                        const conn = connections.get(receivedFrom);
+                        if (conn) {
+                            conn.send({
+                                type: 'video_state',
+                                videoId: currentVideoId,
+                                timestamp: player ? player.getCurrentTime() : 0,
+                                isPlaying: player ? !player.paused : false
+                            });
+                        }
+                    }
+                    break;
+            }
+        }
+
+        function relayData(data, excludePeerId) {
+            // Relay the exact same data object without modification
+            connections.forEach((conn, peerId) => {
+                if (peerId !== excludePeerId) {
+                    conn.send(data);
+                }
+            });
+        }
+
+        function generateMessageId() {
+            return `${peer.id}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('message-input');
+            const message = input.value.trim();
+            if (!message) return;
+
+            const messageId = generateMessageId();
+            const messageData = {
+                type: 'chat',
+                message: message,
+                originalSender: peer.id,
+                messageId: messageId
+            };
+
+            // Send to all connected peers
+            connections.forEach(conn => conn.send(messageData));
+
+            // Display own message
+            displayMessage(message, 'You');
+            messagesSeen.add(messageId);
+            input.value = '';
+        }
+
+        function displayMessage(message, sender) {
+            const messagesDiv = document.getElementById('messages');
+            const messageElement = document.createElement('p');
+            messageElement.textContent = `${sender === peer.id ? sender : sender === 'You' ? sender : sender}: ${message}`;
+            messagesDiv.appendChild(messageElement);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        let player;
+        let currentVideoId;
+
+        function loadVideo() {
+            const videoId = document.getElementById('video-id').value;
+            if (!videoId) return;
+
+            isHost = true;
+            currentVideoId = videoId;
+            updateRoleIndicator();
+
+            const videoState = {
+                type: 'video_state',
+                videoId: videoId,
+                timestamp: 0,
+                isPlaying: true
+            };
+
+            // Send video state to all connected peers
+            connections.forEach(conn => conn.send(videoState));
+        }
+
+        function updateVideoState(state) {
+            document.getElementById('player-overlay').style.display = 'none';
+            // Update the video player with the new state
+        }
+
+        // Initialize the peer connection
+        initPeer();
+
+        document.getElementById('message-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+    </script>
+</body>
+</html>
