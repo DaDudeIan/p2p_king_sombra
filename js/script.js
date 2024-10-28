@@ -6,6 +6,12 @@ let messagesSeen = new Set(); // Track message IDs to prevent duplicates
 
 
 // Initialize PeerJS
+/**
+ * Initializes a new Peer instance and sets up event listeners for peer events.
+ * 
+ * - On 'open' event, updates the peer ID in the DOM and calls `updateRoleIndicator`.
+ * - On 'connection' event, sets up the incoming connection using `setupConnection`.
+ */
 function initPeer() {
     peer = new Peer();
     
@@ -20,6 +26,17 @@ function initPeer() {
     });
 }
 
+/**
+ * Updates the role indicator element based on the current connection status.
+ * 
+ * The function checks if the user is a host or if there are any active connections,
+ * and updates the text content and class name of the role indicator element accordingly.
+ * 
+ * Possible statuses:
+ * - 'Host': When the user is a host.
+ * - 'Connected': When there are active connections.
+ * - 'Disconnected': When there are no active connections.
+ */
 function updateRoleIndicator() {
     const indicator = document.getElementById('role-indicator');
     let status = isHost ? 'Host' : connections.size > 0 ? 'Connected' : 'Disconnected';
@@ -37,6 +54,9 @@ function updateRoleIndicator() {
     }
 }
 
+/**
+ * Sets up a connection with a peer, handling events for open, data, and close.
+ */
 function setupConnection(conn) {
     connections.set(conn.peer, conn);
     updateRoleIndicator();
@@ -60,6 +80,10 @@ function setupConnection(conn) {
     });
 }
 
+/**
+ * Establishes a connection to a peer using the provided peer ID from the input field.
+ * If the input field is empty or the provided ID matches the current peer's ID, the function returns without making a connection.
+ */
 function connectToPeer() {
     const connectId = document.getElementById('peer-id-input').value;
     if (!connectId || connectId === peer.id) return;
@@ -68,6 +92,16 @@ function connectToPeer() {
     setupConnection(conn);
 }
 
+/**
+ * Handles incoming data and processes it based on its type.
+ * 
+ * @param {Object} data - The incoming data object.
+ * @param {string} data.type - The type of the incoming data (e.g., 'chat', 'video_state').
+ * @param {string} data.messageId - The unique identifier for the message (only for 'chat' type).
+ * @param {string} data.message - The message content (only for 'chat' type).
+ * @param {string} data.originalSender - The original sender of the message (only for 'chat' type).
+ * @param {string} receivedFrom - The identifier of the sender from whom the data was received.
+ */
 function handleIncomingData(data, receivedFrom) {
     // Clone the data to prevent modifications affecting the relay
     const originalData = JSON.parse(JSON.stringify(data));
@@ -88,6 +122,12 @@ function handleIncomingData(data, receivedFrom) {
     }
 }
 
+/**
+ * Relays data to all connected peers except the specified one.
+ *
+ * @param {Object} data - The data object to be relayed.
+ * @param {string} excludePeerId - The ID of the peer to exclude from relaying.
+ */
 function relayData(data, excludePeerId) {
     // Relay the exact same data object without modification
     connections.forEach((conn, peerId) => {
@@ -99,10 +139,24 @@ function relayData(data, excludePeerId) {
 
 // CHAT
 
+/**
+ * Generates a unique message ID.
+ *
+ * The message ID is composed of the peer's ID, the current timestamp, and a random string.
+ *
+ * @returns {string} A unique message ID.
+ */
 function generateMessageId() {
     return `${peer.id}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
+/**
+ * Sends a chat message to all connected peers and displays it in the chat window.
+ * 
+ * This function retrieves the message from the input field, generates a unique message ID,
+ * and sends the message to all connected peers. It also displays the message in the chat
+ * window and clears the input field.
+ */
 function sendMessage() {
     const input = document.getElementById('message-input');
     const message = input.value.trim();
@@ -125,6 +179,12 @@ function sendMessage() {
     input.value = '';
 }
 
+/**
+ * Displays a message in the messages div.
+ *
+ * @param {string} message - The message to display.
+ * @param {string} sender - The sender of the message. If the sender is the peer's ID, it will display the sender's ID. If the sender is 'You', it will display 'You'.
+ */
 function displayMessage(message, sender) {
     const messagesDiv = document.getElementById('messages');
     const messageElement = document.createElement('p');
@@ -140,6 +200,10 @@ function getMedia() {
 
 
 // Copy id to clipboard
+/**
+ * Copies the text content of the HTML element with the ID 'peer-id' to the clipboard.
+ * Logs the text content to the console before copying.
+ */
 function copyId() {
     const to_clipboard = document.getElementById('peer-id');
     console.log("Copying to clipboard: '" + to_clipboard.textContent + "'");
