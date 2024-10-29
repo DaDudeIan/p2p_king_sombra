@@ -195,8 +195,37 @@ function displayMessage(message, sender) {
 
 // Media
 function getMedia() {
-    return;
+    const preferredDisplaySurface = document.getElementById('displaySurface'); // Assuming you have this element in your HTML
+    const options = { audio: true, video: true };
+    const displaySurface = preferredDisplaySurface.options[preferredDisplaySurface.selectedIndex].value;
+
+    if (displaySurface !== 'default') {
+        options.video = { displaySurface };
+    }
+
+    navigator.mediaDevices.getDisplayMedia(options)
+        .then((stream) => {
+            // Attach the stream to the video element (if you have one)
+            const video = document.querySelector('video');
+            video.srcObject = stream;
+
+            // Share the stream with connected peers
+            connections.forEach((conn) => {
+                conn.send({
+                    type: 'video_stream',
+                    stream: stream // You may need to handle stream transfer properly
+                });
+            });
+
+            // Detect when the user has stopped sharing the screen
+            stream.getVideoTracks()[0].addEventListener('ended', () => {
+                // Handle screen sharing stopped event
+                alert('Screen sharing has ended.');
+            });
+        })
+        .catch(handleError);
 }
+
 
 
 // Copy id to clipboard

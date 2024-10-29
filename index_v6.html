@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P Video Streaming</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
+    <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
+    <script src="js/script.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+        }
+        .video-section {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .chat-section {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+            height: 600px;
+            display: flex;
+            flex-direction: column;
+        }
+        #messages {
+            flex-grow: 1;
+            overflow-y: auto;
+            margin-bottom: 10px;
+            background: white;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .input-group {
+            margin-bottom: 15px;
+        }
+        input, button {
+            padding: 8px;
+            margin: 5px 0;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+        }
+        #player {
+            width: 100%;
+            max-width: 800px;
+            margin-top: 10px;
+        }
+        .message {
+            margin: 5px 0;
+            padding: 5px;
+            border-radius: 4px;
+            background: #e9ecef;
+        }
+        .status-indicator {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            background: #e9ecef;
+            margin-left: 10px;
+        }
+        .host {
+            background: #03ff3e;
+            color: white;
+        }
+        .connected {
+            background: #28a745;
+            color: white;
+        }
+        .disconncted {
+            background: #e9ecef;
+            color: white;
+        }
+        .failed {
+            background: #dc3545;
+            color: white;
+        }
+        .input-id {
+            width: 50%;
+        }
+        p {
+            padding: 4px 8px;
+            border-radius: 4px;
+            background: #e9ebee;
+            margin-bottom: 5px;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="video-section">
+            <h2>P2P Video Streaming</h2>
+            <div class="input-group">
+                Your ID: <span id="peer-id"></span>
+                <span id="role-indicator" class="status-indicator disconncted"></span>
+            </div>
+            <div class="input-group">
+                <input type="text" id="peer-id-input" placeholder="Enter peer ID" class="input-id">
+                <button onclick="connectToPeer()">Connect</button>
+            </div>
+            
+            <div class="input-group load-input" id="load-input">
+                <button onclick="getMedia()">Load Media</button>
+                <button onclick="copyId()">Copy ID</button>
+            </div>
+            <video id="player" autoplay playsinline muted></video>
+            <div id="errorMsg"></div>
+        </div>
+        
+        <div class="chat-section">
+            <h2>Chat</h2>
+            <div id="messages"></div>
+            <div class="input-group">
+                <input type="text" id="message-input" placeholder="Type a message...">
+                <button onclick="sendMessage()">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize PeerJS and other required functions
+
+        // Add the getMedia function to share the screen
+        function getMedia() {
+            const video = document.getElementById('player');
+            const options = { video: true, audio: true };
+
+            navigator.mediaDevices.getDisplayMedia(options)
+                .then(stream => {
+                    video.srcObject = stream;
+                    stream.getVideoTracks()[0].addEventListener('ended', () => {
+                        document.getElementById('errorMsg').innerText = 'Screen sharing has ended.';
+                    });
+                })
+                .catch(error => {
+                    document.getElementById('errorMsg').innerText = `Error: ${error.name}`;
+                    console.error(error);
+                });
+        }
+
+        window.onload = initPeer;
+
+        document.getElementById('message-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+    </script>
+</body>
+</html>

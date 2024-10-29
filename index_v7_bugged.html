@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P Video Streaming</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+        }
+        .video-section, .chat-section {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        #messages {
+            height: 400px;
+            overflow-y: auto;
+            margin-bottom: 10px;
+            background: white;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        input, button {
+            padding: 8px;
+            margin: 5px 0;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        #player, video {
+            width: 100%;
+            max-width: 800px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="video-section">
+            <h2>P2P Video Streaming</h2>
+            <div class="input-group">
+                Your ID: <span id="peer-id"></span>
+                <span id="role-indicator" class="status-indicator disconnected"></span>
+            </div>
+            <div class="input-group">
+                <input type="text" id="peer-id-input" placeholder="Enter peer ID">
+                <button onclick="connectToPeer()">Connect</button>
+            </div>
+            <div class="input-group">
+                <button onclick="getMedia()">Load Media</button>
+                <button onclick="copyId()">Copy ID</button>
+            </div>
+            <video id="player" autoplay playsinline muted></video>
+        </div>
+        
+        <div class="chat-section">
+            <h2>Chat</h2>
+            <div id="messages"></div>
+            <div class="input-group">
+                <input type="text" id="message-input" placeholder="Type a message...">
+                <button onclick="sendMessage()">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/script.js"></script>
+</body>
+</html>
