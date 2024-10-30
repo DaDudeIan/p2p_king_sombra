@@ -1,14 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
-<!-- Previous head section remains the same -->
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>P2P Video Streaming</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
-    <script src="js/script.js"></script>
+    <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
+    <script src="js/script_chat2.js"></script>
     <style>
-        /* Previous styles remain the same */
         body {
             font-family: Arial, sans-serif;
             max-width: 1200px;
@@ -100,7 +99,7 @@
         .input-id {
             width: 50%;
         }
-        p.chat {
+        p {
             padding: 4px 8px;
             border-radius: 4px;
             background: #e9ebee;
@@ -126,6 +125,8 @@
                 <button onclick="getMedia()">Load Media</button>
                 <button onclick="copyId()">Copy ID</button>
             </div>
+            <video id="player" autoplay playsinline muted></video>
+            <div id="errorMsg"></div>
         </div>
         
         <div class="chat-section">
@@ -139,8 +140,28 @@
     </div>
 
     <script>
+        // Initialize PeerJS and other required functions
+
+        // Add the getMedia function to share the screen
+        function getMedia() {
+            const video = document.getElementById('player');
+            const options = { video: true, audio: true };
+
+            navigator.mediaDevices.getDisplayMedia(options)
+                .then(stream => {
+                    video.srcObject = stream;
+                    stream.getVideoTracks()[0].addEventListener('ended', () => {
+                        document.getElementById('errorMsg').innerText = 'Screen sharing has ended.';
+                    });
+                })
+                .catch(error => {
+                    document.getElementById('errorMsg').innerText = `Error: ${error.name}`;
+                    console.error(error);
+                });
+        }
+
         window.onload = initPeer;
-        
+
         document.getElementById('message-input').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') sendMessage();
         });

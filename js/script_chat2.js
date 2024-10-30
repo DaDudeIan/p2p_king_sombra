@@ -67,8 +67,19 @@ function setupConnection(conn) {
 
     conn.on('open', () => {
         console.log("setupConnection: open");
-        //setupConnection(conn);
         hostConnection = conn;
+        // Create a connect message from the new peer
+        const messageId = `${conn.peer}-${Date.now()}-connect`;
+        const connectData = {
+            type: 'chat',
+            message: 'Connected',
+            originalSender: conn.peer,
+            messageId: messageId
+        };
+        
+        // Handle the connect message locally
+        handleIncomingData(connectData, conn.peer);
+
         // Request current video state from the peer we're connecting to
         conn.send({
             type: 'request_video_state'
@@ -77,13 +88,25 @@ function setupConnection(conn) {
 
     conn.on('data', (data) => {
         console.log("setupConnection: data");
-        handleIncomingData({...data}, conn.peer); // Clone the data to prevent modification
+        handleIncomingData({...data}, conn.peer);
     });
 
     conn.on('close', () => {
         console.log("setupConnection: close");
-        sendMessage('Disconnected'); // TODO: Send disconnect message
-        //connections.delete(conn.peer);
+        // Create a disconnect message as if it came from the disconnected peer
+        const messageId = `${conn.peer}-${Date.now()}-disconnect`;
+        const disconnectData = {
+            type: 'chat',
+            message: 'Disconnected',
+            originalSender: conn.peer,
+            messageId: messageId
+        };
+        
+        // Handle the disconnect message locally
+        handleIncomingData(disconnectData, conn.peer);
+        
+        // Remove the connection
+        connections.delete(conn.peer);
         updateRoleIndicator();
     });
 }
@@ -123,12 +146,16 @@ function handleIncomingData(data, receivedFrom) {
         if (!messagesSeen.has(data.messageId)) {
             messagesSeen.add(data.messageId);
             // Display message with original sender
-            displayMessage(data.message, data.originalSender);
-            console.log("Received message: " + data.message + " from " + data.originalSender);
-            if (data.message == 'Disconnected') {
-                console.log("Disconnected message received from " + data.originalSender);
-                removeConnection(data.originalSender);
+            if (data.message === 'Disconnected' || data.message === 'Connected') {
+                displayMessage(data.message, data.originalSender);
+                if (data.message === 'Disconnected') {
+                    removeConnection(data.originalSender);
+                }
+            } else {
+                displayMessage(data.message, data.originalSender);
             }
+            console.log("Received message: " + data.message + " from " + data.originalSender);
+            
             // Relay the original unchanged message data
             relayData(originalData, receivedFrom);
         }
@@ -188,30 +215,28 @@ function sendMessage(msg) {
     if (msg === undefined) {
         message = input.value.trim();
         if (!message) return;
-
-        messageData = {
-            type: 'chat',
-            message: message,
-            originalSender: peer.id,
-            messageId: messageId
-        };
     } else {
         message = msg;
-        messageData = {
-            type: 'chat',
-            message: message,
-            originalSender: peer.id,
-            messageId: messageId
-        };
     }
+
+    messageData = {
+        type: 'chat',
+        message: message,
+        originalSender: peer.id,
+        messageId: messageId
+    };
 
     // Send to all connected peers
     connections.forEach(conn => conn.send(messageData));
 
-    // Display own message
-    displayMessage(message, 'You');
+    // Only display as "You" for manually sent messages, not system messages
+    const displaySender = (msg === 'Disconnected' || msg === 'Connected') ? peer.id : 'You';
+    displayMessage(message, displaySender);
     messagesSeen.add(messageId);
-    input.value = '';
+    
+    if (input) {
+        input.value = '';
+    }
 }
 
 /**
