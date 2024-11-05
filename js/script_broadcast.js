@@ -3,7 +3,8 @@ let connections = new Map(); // Store all peer connections
 let isHost = false;
 let hostConnection = null;
 let messagesSeen = new Set(); // Track message IDs to prevent duplicates
-
+let channel = new BroadcastChannel("stream-video");
+let peerConnection;
 
 // Initialize PeerJS
 /**
@@ -138,7 +139,6 @@ function handleIncomingData(data, receivedFrom) {
     console.log("Handling incoming data...");
     // Clone the data to prevent modifications affecting the relay
     const originalData = JSON.parse(JSON.stringify(data));
-
     switch(data.type) {
     case 'chat':
         console.log("Chat message received");
@@ -160,11 +160,51 @@ function handleIncomingData(data, receivedFrom) {
             relayData(originalData, receivedFrom);
         }
         break;
-    case 'video_state':
+    case 'video_stream':
+        /*
+        channel.onmessage = e => {
+            console.log("Received offer")
+            handleOffer(e.data);
+        }*/
+    
+        channel.onmessage = e => {
+        if (e.data.type === "icecandidate") {
+            peerConnection?.addIceCandidate(e.data.candidate)
+        } else if (e.data.type === "offer") {
+            console.log("Received offer")
+            handleOffer(e.data)
+        }
+        }
         break;
     }
 }
-
+function handleOffer(offer) {
+    const video = document.getElementById('player');
+    const config = {};
+    peerConnection = new RTCPeerConnection(config);
+    peerConnection.addEventListener("track", e => video.srcObject = e.streams[0]);
+    peerConnection.addEventListener("icecandidate", e => {
+      let candidate = null;
+      if (e.candidate !== null) {
+        candidate = {
+          candidate: e.candidate.candidate,
+          sdpMid: e.candidate.sdpMid,
+          sdpMLineIndex: e.candidate.sdpMLineIndex,
+        }
+      }
+      channel.postMessage({ type: "icecandidate", candidate })
+    });
+    peerConnection.setRemoteDescription(offer)
+      .then(() => peerConnection.createAnswer())
+      .then(async answer => {
+        await peerConnection.setLocalDescription(answer);
+        console.log("Created answer, sending...")
+        channel.postMessage({
+          type: "answer",
+          sdp: answer.sdp,
+        });
+      });
+  }
 /**
  * Relays data to all connected peers except the specified one.
  *
@@ -265,8 +305,7 @@ function getMedia() {
     const preferredDisplaySurface = document.getElementById('displaySurface');
     const video = document.getElementById('player');
     const options = { audio: true, video: true };
-    let stream;
-    let streamData;
+    
 
     // Check if there is a display surface preference and adjust options accordingly
     if (preferredDisplaySurface) {
@@ -276,20 +315,57 @@ function getMedia() {
         }
     }
 
+    channel.onmessage = e => {
+        if (e.data.type === "icecandidate") {
+            peerConnection?.addIceCandidate(e.data.candidate);
+        } else if (e.data.type === "answer") {
+            console.log("Received answer")
+            peerConnection?.setRemoteDescription(e.data);
+        }
+        }
     streamData = {
         type: 'video_stream',
-        stream: stream,
-        //originalSender: peer.id,
-        //streamId: streamId
+        message: 'hello',
+        originalSender: this.id,
+        messageId: 1234
     };
-
+    connections.forEach(conn => conn.send(streamData));
+    
     navigator.mediaDevices.getDisplayMedia(options)
         .then((stream) => {
+
+            const config = {};
+            peerConnection = new RTCPeerConnection(config);  // local peer connection 
+
+             // add ice candidate event listener
+            peerConnection.addEventListener("icecandidate", e => {
+                let candidate = null;
+                
+                // prepare a candidate object that can be passed through browser channel
+                if (e.candidate !== null) {
+                candidate = {
+                    candidate: e.candidate.candidate,
+                    sdpMid: e.candidate.sdpMid,
+                    sdpMLineIndex: e.candidate.sdpMLineIndex,
+                };
+                }
+                channel.postMessage({ type: "icecandidate", candidate });
+            });
+            
             // Attach the stream to the video element
             video.srcObject = stream;
 
-            // Share the stream with connected peers
-            connections.forEach(conn => conn.send(streamData));
+            // add media tracks to the peer connection
+            stream.getTracks()
+                .forEach(track => peerConnection.addTrack(track, stream));
+
+            // Create offer and send through the browser channel
+            peerConnection.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
+            .then(async offer => {
+                await peerConnection.setLocalDescription(offer);
+                console.log("Created offer, sending...");
+                channel.postMessage({ type: "offer", sdp: offer.sdp });
+            });
 
             // Detect when the user has stopped sharing the screen
             stream.getVideoTracks()[0].addEventListener('ended', () => {
@@ -301,7 +377,7 @@ function getMedia() {
             // Handle errors and display messages
             document.getElementById('errorMsg').innerText = `Error: ${error.name}`;
             console.error("Error with getMedia:", error);
-        });
+        });       
 }
 
 

@@ -25,6 +25,16 @@ function initPeer() {
     peer.on('connection', (conn) => {
         setupConnection(conn);
     });
+
+    peer.on('call', (call) => {
+        call.answer(localStream); // Answer the call with the local stream
+        call.on('stream', remoteStream => {
+            const remoteVideo = document.createElement('video');
+            remoteVideo.autoplay = true;
+            remoteVideo.srcObject = remoteStream;
+            document.body.appendChild(remoteVideo); // Append to body or desired container
+        });
+    });
 }
 
 /**
@@ -237,7 +247,7 @@ function displayMessage(message, sender) {
 
 // Media
 function getMedia() {
-    const preferredDisplaySurface = document.getElementById('displaySurface'); // Assuming you have this element in your HTML
+    const preferredDisplaySurface = document.getElementById('displaySurface');
     const options = { audio: true, video: true };
     const displaySurface = preferredDisplaySurface.options[preferredDisplaySurface.selectedIndex].value;
 
@@ -247,7 +257,7 @@ function getMedia() {
 
     navigator.mediaDevices.getDisplayMedia(options)
         .then((stream) => {
-            // Attach the stream to the video element (if you have one)
+            // Attach the stream to the video element
             const video = document.querySelector('video');
             video.srcObject = stream;
 
@@ -255,14 +265,14 @@ function getMedia() {
             connections.forEach((conn) => {
                 conn.send({
                     type: 'video_stream',
-                    stream: stream // You may need to handle stream transfer properly
+                    stream: stream
                 });
             });
 
             // Detect when the user has stopped sharing the screen
             stream.getVideoTracks()[0].addEventListener('ended', () => {
                 // Handle screen sharing stopped event
-                alert('Screen sharing has ended.');
+                alert('Screen sharing has ended. for real');
             });
         })
         .catch(handleError);
