@@ -199,6 +199,9 @@ async function handleIncomingData(data, receivedFrom) {
                 originalSender: peer.id,
                 streamId: data.streamId
             };
+
+            await delay(5000); // Wait for 5 seconds
+            console.log("Continuing Nesting");
             // Send to all connected peers
             connections.forEach(conn => conn.send(streamData));
     }
