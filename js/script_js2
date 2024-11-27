@@ -4,6 +4,7 @@ let isHost = false;
 let hostConnection = null;
 let messagesSeen = new Set(); // Track message IDs to prevent duplicates
 let streamSeen = new Set();
+const callPromises = []; // Array to store call promises
 
 // Initialize PeerJS
 /**
@@ -25,19 +26,46 @@ function initPeer() {
     peer.on('connection', (conn) => {
         setupConnection(conn);
     });
-
     // Handle incoming stream
     peer.on('call', ((call) => {
-        const video = document.getElementById('player');
-        const audio = document.getElementById('player_audio');
         call.answer(null);
-        console.log("Peer with ID = ",peer.id," received stream");
-        call.on('stream', ((remoteStream) => {
-            console.log("Displaying remote stream");
-            video.srcObject = remoteStream;
-            audio.srcObject = remoteStream;
+        const metadataStreamId = call.metadata?.streamId;
+        console.log("metadataStreamId =", metadataStreamId);
+        if (!streamSeen.has(metadataStreamId)) {
+            streamSeen.add(metadataStreamId);
+            const video = document.getElementById('player');
+            const audio = document.getElementById('player_audio');
+            const metadataId = call.metadata?.id; 
+            let streamProcessed = false; // Flag to ensure single execution
 
-        }));
+            console.log("Peer with ID = ",peer.id," received stream");
+            const streamReady = new Promise((resolve) => {
+                call.on('stream', ((remoteStream) => {
+                    if (!streamProcessed) {
+                        console.log("Displaying remote stream");
+                        video.srcObject = remoteStream;
+                        audio.srcObject = remoteStream;
+                        streamProcessed = true; // Mark the stream as processed
+                        resolve();
+                    }
+                }));
+            });
+
+            // Wait for the stream to be ready before executing the connections logic
+            streamReady.then(() => {
+                console.log("Streaming video further ...");
+                for (const [key, value] of connections) {
+                    if (key != metadataId)
+                    {
+                        const call = peer.call(key, video.srcObject, {
+                            metadata: { id: peer.id,
+                                        streamId: metadataStreamId
+                                }
+                        });
+                    }
+                }
+            });
+    }
     }));
 }
 
@@ -167,31 +195,6 @@ async function handleIncomingData(data, receivedFrom) {
             // Relay the original unchanged message data
             relayData(originalData, receivedFrom);
         }
-        break;
-    case 'stream_video':
-        console.log("Streaming video further ...");
-        if (!streamSeen.has(data.streamId)) {
-            const callPromises = []; // Array to store call promises
-            streamSeen.add(data.streamId);
-            const video = document.getElementById('player');
-            for (const [key, value] of connections) {
-                const call = peer.call(key, video.srcObject);
-                console.log("Stream transmitted to peer with ID = ",key);
-                
-            }
-            // Wait for all peers to answer
-            console.log("Waiting for all peers to answer...");
-            await delay(5000);
-            streamData = {
-                type: 'stream_video',
-                originalSender: peer.id,
-                streamId: data.streamId
-            };
-
-            console.log("Continuing Nesting");
-            // Send to all connected peers
-            connections.forEach(conn => conn.send(streamData));
-    }
     break;
     }
 }
@@ -299,7 +302,6 @@ async function loadMedia() {
     const video = document.getElementById('player');
     const options = { audio: true, video: true };
     const stream_Id = generateMessageId();
-    const callPromises = []; // Array to store call promises
 
     // Check if there is a display surface preference and adjust options accordingly
     if (preferredDisplaySurface) {
@@ -312,23 +314,13 @@ async function loadMedia() {
     .then((stream) => {
         video.srcObject = stream;
         for (const [key, value] of connections){
-                const call = peer.call(key, stream);
+                const call = peer.call(key, stream, {
+                    metadata: { id: peer.id,
+                                streamId: stream_Id }
+                });
                 console.log("Stream transmitted to peer with ID = ",key);
         }
     });
-
-    // Wait for all peers to answer
-    console.log("Waiting for all peers to answer...");
-    await delay(5000);
-    streamData = {
-        type: 'stream_video',
-        originalSender: peer.id,
-        streamId: stream_Id
-    };
-    streamSeen.add(stream_Id);
-    // Send to all connected peers
-    console.log("Starting Nesting");
-    connections.forEach(conn => conn.send(streamData));
 }
 
 
