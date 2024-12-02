@@ -4,8 +4,7 @@ let isHost = false;
 let hostConnection = null;
 let messagesSeen = new Set(); // Track message IDs to prevent duplicates
 let streamSeen = new Set();
-let delayLog = []; // Array to store delays
-
+const callPromises = []; // Array to store call promises
 
 // Initialize PeerJS
 /**
@@ -132,14 +131,6 @@ function setupStream(call) {
             const delay = new Date().getTime() - timestamp;
             console.log("Delay = ",delay);
             console.log("Forwarding remote stream");
-
-            // Log delay to in-memory array
-            delayLog.push(delay);
-
-            // Create a downloadable text file
-            createDownloadableFile();
-
-
             for (const [key, value] of connections) {
                 if (key != metadataId)
                 {
@@ -153,27 +144,17 @@ function setupStream(call) {
             }
         }
     }));
+
+    call.on('close', () => {
+        console.log("setupStream: close");
+        const video = document.getElementById('player');
+        if (video.srcObject == null)
+        {
+            // Message host for new stream
+        }
+    });
 }
 
-function createDownloadableFile() {
-    const fileContent = delayLog.join('\n'); // Convert delays to newline-separated string
-    const blob = new Blob([fileContent], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-
-    const downloadLink = document.getElementById('download-link');
-    if (downloadLink) {
-        downloadLink.href = url;
-        downloadLink.download = `delay_${peer.id}.txt`;
-    } else {
-        // Create a new download link if not existing
-        const link = document.createElement('a');
-        link.id = 'download-link';
-        link.href = url;
-        link.download = `delay_${peer.id}.txt`;
-        link.textContent = 'Download Delay Log';
-        document.body.appendChild(link);
-    }
-}
 /**
  * Establishes a connection to a peer using the provided peer ID from the input field.
  * If the input field is empty or the provided ID matches the current peer's ID, the function returns without making a connection.
@@ -185,6 +166,19 @@ function connectToPeer() {
 
     const conn = peer.connect(connectId);
     setupConnection(conn);
+    const msgid = generateMessageId();
+    const connectData = {
+        type: 'connect',
+        originalSender: peer.id,
+        messageId: msgid
+    };
+    delayPromise = delay(400);
+    delayPromise
+    .then(() => {
+        connections.forEach((conn) => {
+            conn.send(connectData, peer.id);
+        });
+    });
 }
 
 /**
@@ -197,7 +191,7 @@ function connectToPeer() {
  * @param {string} data.originalSender - The original sender of the message (only for 'chat' type).
  * @param {string} receivedFrom - The identifier of the sender from whom the data was received.
  */
-async function handleIncomingData(data, receivedFrom) {
+function handleIncomingData(data, receivedFrom) {
     console.log("Handling incoming data...");
     // Clone the data to prevent modifications affecting the relay
     const originalData = JSON.parse(JSON.stringify(data));
@@ -205,21 +199,51 @@ async function handleIncomingData(data, receivedFrom) {
     case 'chat':
         console.log("Chat message received");
         // Check if we've seen this message before
-        if (!messagesSeen.has(data.messageId)) {
+        if (!messagesSeen.has(data.messageId) && peer.id != data.originalSender) {
             messagesSeen.add(data.messageId);
             // Display message with original sender
             if (data.message === 'Disconnected' || data.message === 'Connected') {
+                console.log("Received connected message from: ",data.originalSender);
                 displayMessage(data.message, data.originalSender);
                 if (data.message === 'Disconnected') {
                     removeConnection(data.originalSender);
                 }
             } else {
+                console.log("Not disconnected or connected");
                 displayMessage(data.message, data.originalSender);
             }
-            console.log("Received message: " + data.message + " from " + data.originalSender);
+            //console.log("Received message: " + data.message + " from " + data.originalSender);
             
             // Relay the original unchanged message data
             relayData(originalData, receivedFrom);
+            if (!isHost){
+                relayData(originalData, receivedFrom);
+            }
+        }
+    break;
+    case 'connect':
+        console.log("Connect message received");
+        // Check if we've seen this message before
+        if (!messagesSeen.has(data.messageId)) {
+            console.log("Message id not seen");
+            messagesSeen.add(data.messageId);
+            if (!connections.has(data.originalSender))
+            {
+                console.log("Does not have ID in connections");
+                if (isHost)
+                {
+                    console.log("Is the host");
+                    const conn = peer.connect(data.originalSender);
+                    setupConnection(conn);
+                }
+            }
+            if (!isHost){
+                delayPromise = delay(300);
+                delayPromise
+                .then(() => {
+                    relayData(originalData, receivedFrom);
+                });
+            }
         }
     break;
     }
@@ -235,10 +259,11 @@ function relayData(data, excludePeerId) {
     // Relay the exact same data object without modification
     connections.forEach((conn, peerId) => {
         if (peerId !== excludePeerId) {
-            conn.send(data);
+            conn.send(data, peer.id);
         }
     });
 }
+
 
 function removeConnection(peerId) {
     connections.delete(peerId);
@@ -322,7 +347,8 @@ function displayMessage(message, sender) {
 }
 
 // Media
-async function loadMedia() {
+function loadMedia() {
+    console.log(connections);
     console.log("Streaming...");
     const preferredDisplaySurface = document.getElementById('displaySurface');
     const video = document.getElementById('player');
@@ -345,6 +371,8 @@ async function loadMedia() {
                                 streamId: stream_Id,
                                 timestamp: new Date().getTime() }
                 });
+                isHost = true;
+                updateRoleIndicator();
                 console.log("Stream transmitted to peer with ID = ",key);
         }
     });
@@ -376,4 +404,14 @@ function copyId() {
     const to_clipboard = document.getElementById('peer-id');
     console.log("Copying to clipboard: '" + to_clipboard.textContent + "'");
     navigator.clipboard.writeText(to_clipboard.textContent);
+}
+
+// Utility function to create a delay
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function makeHost() {
+    isHost = true;
+    updateRoleIndicator();
 }
