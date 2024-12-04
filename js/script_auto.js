@@ -457,8 +457,3 @@ function copyId() {
 function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
-
-function makeHost() {
-    isHost = true;
-    updateRoleIndicator();
-}
