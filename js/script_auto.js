@@ -1,13 +1,16 @@
 let peer;
 let connections = new Map(); // Store all peer connections
 let isHost = false;
-let hostConnection = null;
-let messagesSeen = new Set(); // Track message IDs to prevent duplicates
 let streamSeen = new Set();
 let peerList = new Map();
+let sortedPeerList;
 let bandwidth = 0;
+let callList = new Set();
 let isActive = false;
-
+let starStreaming = false;
+let remoteStream;
+let timestamp;
+let stream_Id;
 // Initialize PeerJS
 /**
  * Initializes a new Peer instance and sets up event listeners for peer events.
@@ -18,7 +21,7 @@ let isActive = false;
 function initPeer() {
     console.log("Initializing PeerJS...");
     peer = new Peer();
-    bandwidth = Math.random()*5;
+    bandwidth = Math.random()*5+1;
     console.log("bandwidth = ",bandwidth);
     
     peer.on('open', (id) => {
@@ -49,7 +52,7 @@ function initPeer() {
  * - 'Disconnected': When there are no active connections.
  */
 function updateRoleIndicator() {
-    console.log("Updating role indicator...");
+    //console.log("Updating role indicator...");
     const indicator = document.getElementById('role-indicator');
     console.log("Connections size: " + connections.size);
     let status = isHost ? 'Host' : connections.size > 0 ? 'Connected' : 'Disconnected';
@@ -74,26 +77,18 @@ function setupConnection(conn) {
     console.log("Setting up connection with peer: " + conn.peer);
     connections.set(conn.peer, conn);
     updateRoleIndicator();
+    let conn_bw = conn.metadata?.bandwidth;
+    if (!peerList.has(conn.peer) && conn_bw != bandwidth){
+        let status = conn.metadata?.isActive;
+        peerList.set(conn.peer, {bandwidth: conn_bw, isActive: status});
+    }
 
     conn.on('open', () => {
-        console.log("setupConnection: open");
-        hostConnection = conn;
-        // Create a connect message from the new peer
-        const messageId = `${conn.peer}-${Date.now()}-connect`;
-        const connectData = {
-            type: 'chat',
-            message: 'Connected',
-            originalSender: conn.peer,
-            messageId: messageId
-        };
-        
-        // Handle the connect message locally
-        handleIncomingData(connectData, conn.peer);
+        //console.log("connection open");
     });
 
     conn.on('data', (data) => {
-        console.log("setupConnection: data");
-        handleIncomingData({...data}, conn.peer);
+        handleIncomingData({...data});
     });
 
     conn.on('close', () => {
@@ -118,54 +113,26 @@ function setupConnection(conn) {
 
 function setupStream(call) {
     call.answer();
-
-    call.on('stream', ((remoteStream) => {
+    call.on('stream', ((stream) => {
         //console.log("Peer with ID = ",peer.id," received remote stream");
         const metadataStreamId = call.metadata?.streamId;
-        if (!streamSeen.has(metadataStreamId) && !isActive) {
+        if (!streamSeen.has(metadataStreamId)) {
             streamSeen.add(metadataStreamId);
             const video = document.getElementById('player');
             const audio = document.getElementById('player_audio');
             const metadataId = call.metadata?.id; 
-            const timestamp = call.metadata?.timestamp;
+            timestamp = call.metadata?.timestamp;
             peerList = new Map(JSON.parse(call.metadata?.peerList));
-            console.log("peerList = ",peerList);
-
+            remoteStream = stream;
             console.log("Displaying remote stream");
-            video.srcObject = remoteStream;
-            audio.srcObject = remoteStream;
-            const delay = new Date().getTime() - timestamp;
-            console.log("Delay = ",delay);
+            video.srcObject = stream;
+            audio.srcObject = stream;
             isActive = true;
-
-            temp_list = new Set();
-            peerList.forEach((value, key) => {
-                if (bandwidth >= 1 && !value.isActive){
-                    value.isActive = true;
-                    temp_list.add(key);
-                    bandwidth -=1;
-                }
-            });
-            let temp_peerList = JSON.stringify(Array.from(peerList));
-            temp_list.forEach((peerId) => {
-                console.log("Forwarding remote stream to ",peerId);
-                const call = peer.call(peerId, remoteStream, {
-                    metadata: { id: peer.id,
-                                streamId: metadataStreamId,
-                                peerList: temp_peerList,
-                                timestamp: timestamp }
-                });
-            });
-        } else{
-            call.end
+            const delayed = new Date().getTime() - timestamp;
+            console.log("Delay = ",delayed);
+            console.log("Time Received Stream = ",new Date().getTime());
         }
     }));
-
-    call.on('close', () => {
-        console.log("setupStream: close");
-        const video = document.getElementById('player');
-        isActive = false;
-    });
 }
 
 /**
@@ -177,21 +144,15 @@ function connectToPeer() {
     const connectId = document.getElementById('peer-id-input').value;
     if (!connectId || connectId === peer.id) return;
 
-    const conn = peer.connect(connectId);
+    const conn = peer.connect(connectId, {metadata: {isActive: isActive, bandwidth: bandwidth}});
     setupConnection(conn);
-    const msgid = generateMessageId();
-    const connectData = {
-        type: 'connect',
-        originalSender: peer.id,
-        bandwidth: bandwidth,
-        messageId: msgid
-    };
-    delayPromise = delay(400);
-    delayPromise
+    waitForConnection = delay(400);
+    waitForConnection
     .then(() => {
-        connections.forEach((conn) => {
-            conn.send(connectData, peer.id);
-        });
+        console.log("Requesting peer list from ", conn.peer);
+        conn.send({
+            type: 'wantPeerList',
+            peerId: peer.id});
     });
 }
 
@@ -205,49 +166,82 @@ function connectToPeer() {
  * @param {string} data.originalSender - The original sender of the message (only for 'chat' type).
  * @param {string} receivedFrom - The identifier of the sender from whom the data was received.
  */
-function handleIncomingData(data, receivedFrom) {
-    console.log("Handling incoming data...");
-    // Clone the data to prevent modifications affecting the relay
-    const originalData = JSON.parse(JSON.stringify(data));
+function handleIncomingData(data) {
     switch(data.type) {
     case 'chat':
-        console.log("Chat message received");
-        // Check if we've seen this message before
-        if (!messagesSeen.has(data.messageId) && peer.id != data.originalSender) {
-            messagesSeen.add(data.messageId);
-            // Display message with original sender
-            if (data.message === 'Disconnected' || data.message === 'Connected') {
-                console.log("Received connected message from: ",data.originalSender);
-                displayMessage(data.message, data.originalSender);
-                if (data.message === 'Disconnected') {
-                    removeConnection(data.originalSender);
-                }
-            } else {
-                console.log("Not disconnected or connected");
-                displayMessage(data.message, data.originalSender);
-            }
-            //console.log("Received message: " + data.message + " from " + data.originalSender);
-            
-            // Relay the original unchanged message data
-            relayData(originalData, receivedFrom);
-        }
+        console.log("chat message received");
+        displayMessage(data.message, data.originalSender);
     break;
     case 'connect':
-        console.log("Connect message received");
-        // Check if we've seen this message before
-        if (!messagesSeen.has(data.messageId)) {
-            messagesSeen.add(data.messageId);
-            if (isHost)
-            {
-                peerList.set(data.originalSender, { bandwidth: data.bandwidth, isActive: false });
+        console.log("Received connect message");
+        peerList.set(data.sender, {bandwidth: data.bandwidth, isActive: data.isActive});
+        let temp_peerList_connect = new Map(JSON.parse(data.list));
+        temp_peerList_connect.forEach((value, peerId) => {
+            if (!connections.has(peerId) && peerId != peer.id){
+                const conn = peer.connect(peerId, {metadata: {isActive: isActive, bandwidth: bandwidth}});
+                peerList.set(peerId, {bandwidth: value.bandwidth, isActive: value.isActive});
+                setupConnection(conn);
             }
-            if (!isHost){
-                delayPromise = delay(300);
-                delayPromise
-                .then(() => {
-                    relayData(originalData, receivedFrom);
-                });
+        });
+    break;
+    case 'wantPeerList':
+        console.log("transmitting peer list to ",data.peerId);
+        json_list = JSON.stringify(Array.from(peerList));
+        const connectData = {
+            type: 'connect',
+            list: json_list,
+            sender: peer.id,
+            bandwidth: bandwidth,
+            isActive: isActive
+        };
+        const conn = connections.get(data.peerId);
+        conn.send(connectData);
+    break;
+    case 'isActive':
+        conn = connections.get(data.peerId);
+        conn.send({type: 'updateStatus', peerId: peer.id, status: isActive});
+        console.log("isActive time = ",new Date().getTime());
+    break;
+    case 'updateStatus':
+        statusList.set(data.peerId, data.status);
+        console.log("updateStatus time = ",new Date().getTime());
+    break;
+    case 'forwardStream':
+        console.log("Time forwarding stream = ",new Date().getTime());
+        available_bandwidth = bandwidth;
+        peerList = new Map(JSON.parse(data.peerList));
+        temp_list = new Set();
+        let has_streamed = false;
+        const peerId_bandwidth = peerList.keys().next().value;
+        peerList.forEach((value, key) => {
+            if (available_bandwidth >= 1 && !value.isActive){
+                value.isActive = true;
+                temp_list.add(key);
+                available_bandwidth -= 1;
             }
+        });
+        peerList.delete(peerId_bandwidth);
+        let temp_peerList = JSON.stringify(Array.from(peerList));
+        temp_list.forEach((peerId) => {
+            //Stream to peer
+            const call = peer.call(peerId, remoteStream, {
+                metadata: { id: peer.id,
+                    streamId: data.streamId,
+                    peerList: temp_peerList,
+                    timestamp: timestamp }
+            });
+            has_streamed = true;
+            callList.add(call);
+            console.log("Stream forwarded to peer with ID = ",peerId);
+        });
+        if (has_streamed){
+            const conn = connections.get(peerId_bandwidth);
+            WaitToForward = delay(200);
+            WaitToForward
+            .then(() => {
+                //Send forwarding message to highest bandwidth peer
+                conn.send({type: 'forwardStream', streamId: data.streamId, peerList: temp_peerList});
+            });
         }
     break;
     }
@@ -321,7 +315,6 @@ function sendMessage(msg) {
     // Only display as "You" for manually sent messages, not system messages
     const displaySender = (msg === 'Disconnected' || msg === 'Connected') ? peer.id : 'You';
     displayMessage(message, displaySender);
-    messagesSeen.add(messageId);
     
     if (input) {
         input.value = '';
@@ -353,25 +346,19 @@ function displayMessage(message, sender) {
 // Media
 function loadMedia() {
     // Sort by bandwidth in descending order
-    let sortedPeerList = new Map([...peerList.entries()].sort((a, b) => b[1].bandwidth - a[1].bandwidth));
-    peerList = sortedPeerList;
-    console.log(peerList);
-    temp_list = new Set();
+    sortedPeerList = new Map([...peerList.entries()].sort((a, b) => b[1].bandwidth - a[1].bandwidth));
+    available_bandwidth = bandwidth;
+    //peerList = new Map(sortedPeerList);
+    console.log("peerList = ",peerList);
+    console.log("sortedPeerList = ", sortedPeerList);
 
-    peerList.forEach((value, key) => {
-        if (bandwidth >= 1){
-            value.isActive = true;
-            temp_list.add(key);
-            bandwidth -=1;
-        }
-    });
-    // Stringify the Map
-    let temp_peerList = JSON.stringify(Array.from(peerList));
     console.log("Streaming...");
     const preferredDisplaySurface = document.getElementById('displaySurface');
     const video = document.getElementById('player');
     const options = { audio: true, video: true };
-    const stream_Id = generateMessageId();
+    stream_Id = generateMessageId();
+    const peerId_bandwidth = sortedPeerList.keys().next().value;
+    let has_streamed = false;
 
     // Check if there is a display surface preference and adjust options accordingly
     if (preferredDisplaySurface) {
@@ -380,20 +367,61 @@ function loadMedia() {
             options.video = { displaySurface };
         }
     }
+    
+    temp_list = new Set();
+    sortedPeerList.forEach((value, key) => {
+        if (available_bandwidth >= 1){
+            value.isActive = true;
+            temp_list.add(key);
+            available_bandwidth -=1;
+        }
+    });
+    sortedPeerList.delete(peerId_bandwidth);
+    let temp_peerList = JSON.stringify(Array.from(sortedPeerList));
+    console.log("temp_list = ",temp_list);
     navigator.mediaDevices.getDisplayMedia(options)
     .then((stream) => {
         video.srcObject = stream;
         temp_list.forEach((peerId) => {
+            //Stream to peer
             const call = peer.call(peerId, stream, {
                 metadata: { id: peer.id,
                             streamId: stream_Id,
                             peerList: temp_peerList,
                             timestamp: new Date().getTime() }
             });
-            isHost = true;
-            updateRoleIndicator();
+            has_streamed = true;
+            callList.add(call);
             console.log("Stream transmitted to peer with ID = ",peerId);
-          });
+            streamSeen.add(stream_Id);
+            isActive = true;
+        });
+        if (has_streamed){
+            console.log("Connections = ",connections);
+            let temp_peerList = JSON.stringify(Array.from(sortedPeerList));
+            const conn = connections.get(peerId_bandwidth);
+            console.log("largest peer bandwidth = ",peerId_bandwidth);
+            WaitToForward = delay(200);
+            WaitToForward
+            .then(() => {
+                //Send forwarding message to highest bandwidth peer
+                conn.send({type: 'forwardStream', streamId: stream_Id, peerList: temp_peerList});
+                has_streamed = false;
+            });
+        }
+        isHost = true;
+        updateRoleIndicator();
+        // Detect when the user has stopped sharing the screen
+        stream.getVideoTracks()[0].addEventListener('ended', () => {
+            isHost = false;
+            updateRoleIndicator();
+            // Handle screen sharing stopped event
+            callList.forEach((call) => {
+                //call.close() is bugged, it does not trigger the call.on('close' () => {}) event.
+                call.close();
+                //Instead one can use the conn.close(), this does trigger the conn.on('close' () => {}) event.
+            });
+        });
     });
 }
 
