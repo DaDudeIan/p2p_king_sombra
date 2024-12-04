@@ -199,6 +199,7 @@ function handleIncomingData(data) {
     break;
     case 'forwardStream':
         console.log("Time forwarding stream = ",new Date().getTime());
+        const WaitToForward = delay(200);
         available_bandwidth = bandwidth;
         peerList = new Map(JSON.parse(data.peerList));
         temp_list = new Set();
@@ -227,7 +228,6 @@ function handleIncomingData(data) {
         });
         if (has_streamed){
             const conn = connections.get(peerId_bandwidth);
-            WaitToForward = delay(200);
             WaitToForward
             .then(() => {
                 //Send forwarding message to highest bandwidth peer

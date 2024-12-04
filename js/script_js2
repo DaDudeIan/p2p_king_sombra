@@ -143,7 +143,7 @@ function setupStream(call) {
             for (const [key, value] of connections) {
                 if (key != metadataId)
                 {
-                    const call = peer.call(key, video.srcObject, {
+                    const call = peer.call(key, remoteStream, {
                         metadata: { id: peer.id,
                                     streamId: metadataStreamId,
                                     timestamp: timestamp
