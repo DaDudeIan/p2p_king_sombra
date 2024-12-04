@@ -197,15 +197,6 @@ function handleIncomingData(data) {
         const conn = connections.get(data.peerId);
         conn.send(connectData);
     break;
-    case 'isActive':
-        conn = connections.get(data.peerId);
-        conn.send({type: 'updateStatus', peerId: peer.id, status: isActive});
-        console.log("isActive time = ",new Date().getTime());
-    break;
-    case 'updateStatus':
-        statusList.set(data.peerId, data.status);
-        console.log("updateStatus time = ",new Date().getTime());
-    break;
     case 'forwardStream':
         console.log("Time forwarding stream = ",new Date().getTime());
         available_bandwidth = bandwidth;
@@ -345,10 +336,13 @@ function displayMessage(message, sender) {
 
 // Media
 function loadMedia() {
+    //Reset peerList status
+    peerList.forEach((value, key) => {
+        value.isActive = false;
+    });
     // Sort by bandwidth in descending order
     sortedPeerList = new Map([...peerList.entries()].sort((a, b) => b[1].bandwidth - a[1].bandwidth));
     available_bandwidth = bandwidth;
-    //peerList = new Map(sortedPeerList);
     console.log("peerList = ",peerList);
     console.log("sortedPeerList = ", sortedPeerList);
 
