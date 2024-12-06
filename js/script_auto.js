@@ -214,26 +214,27 @@ function handleIncomingData(data) {
         });
         peerList.delete(peerId_bandwidth);
         let temp_peerList = JSON.stringify(Array.from(peerList));
-        temp_list.forEach((peerId) => {
-            //Stream to peer
-            const call = peer.call(peerId, remoteStream, {
-                metadata: { id: peer.id,
-                    streamId: data.streamId,
-                    peerList: temp_peerList,
-                    timestamp: timestamp }
+        WaitToForward
+        .then(() => {
+            temp_list.forEach((peerId) => {
+                //Stream to peer
+                const call = peer.call(peerId, remoteStream, {
+                    metadata: { id: peer.id,
+                        streamId: data.streamId,
+                        peerList: temp_peerList,
+                        timestamp: timestamp }
+                });
+                has_streamed = true;
+                callList.add(call);
+                console.log("Stream forwarded to peer with ID = ",peerId);
             });
-            has_streamed = true;
-            callList.add(call);
-            console.log("Stream forwarded to peer with ID = ",peerId);
+            if (has_streamed){
+                const conn = connections.get(peerId_bandwidth);
+                
+                    //Send forwarding message to highest bandwidth peer
+                    conn.send({type: 'forwardStream', streamId: data.streamId, peerList: temp_peerList});
+            }
         });
-        if (has_streamed){
-            const conn = connections.get(peerId_bandwidth);
-            WaitToForward
-            .then(() => {
-                //Send forwarding message to highest bandwidth peer
-                conn.send({type: 'forwardStream', streamId: data.streamId, peerList: temp_peerList});
-            });
-        }
     break;
     }
 }
