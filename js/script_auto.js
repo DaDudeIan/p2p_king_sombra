@@ -7,10 +7,12 @@ let sortedPeerList;
 let bandwidth = 0;
 let callList = new Set();
 let isActive = false;
+let shouldForward = false;
 let starStreaming = false;
 let remoteStream;
 let timestamp;
 let stream_Id;
+
 // Initialize PeerJS
 /**
  * Initializes a new Peer instance and sets up event listeners for peer events.
@@ -122,7 +124,6 @@ function setupStream(call) {
             const audio = document.getElementById('player_audio');
             const metadataId = call.metadata?.id; 
             timestamp = call.metadata?.timestamp;
-            peerList = new Map(JSON.parse(call.metadata?.peerList));
             remoteStream = stream;
             console.log("Displaying remote stream");
             video.srcObject = stream;
@@ -131,6 +132,9 @@ function setupStream(call) {
             const delayed = new Date().getTime() - timestamp;
             console.log("Delay = ",delayed);
             console.log("Time Received Stream = ",new Date().getTime());
+            if(shouldForward){
+                handleIncomingData({type: 'forwardStream', streamId: metadataStreamId})
+            }
         }
     }));
 }
@@ -146,7 +150,7 @@ function connectToPeer() {
 
     const conn = peer.connect(connectId, {metadata: {isActive: isActive, bandwidth: bandwidth}});
     setupConnection(conn);
-    waitForConnection = delay(400);
+    waitForConnection = delay(500);
     waitForConnection
     .then(() => {
         console.log("Requesting peer list from ", conn.peer);
@@ -197,13 +201,15 @@ function handleIncomingData(data) {
         const conn = connections.get(data.peerId);
         conn.send(connectData);
     break;
+    case 'shouldForward':
+        shouldForward = true;
+        peerList = new Map(JSON.parse(data.peerList));
+
+    break;
     case 'forwardStream':
         console.log("Time forwarding stream = ",new Date().getTime());
-        const WaitToForward = delay(200);
-        available_bandwidth = bandwidth;
-        peerList = new Map(JSON.parse(data.peerList));
-        temp_list = new Set();
-        let has_streamed = false;
+        let available_bandwidth = bandwidth;
+        let temp_list = new Set();
         const peerId_bandwidth = peerList.keys().next().value;
         peerList.forEach((value, key) => {
             if (available_bandwidth >= 1 && !value.isActive){
@@ -213,28 +219,21 @@ function handleIncomingData(data) {
             }
         });
         peerList.delete(peerId_bandwidth);
-        let temp_peerList = JSON.stringify(Array.from(peerList));
-        WaitToForward
-        .then(() => {
-            temp_list.forEach((peerId) => {
-                //Stream to peer
-                const call = peer.call(peerId, remoteStream, {
-                    metadata: { id: peer.id,
-                        streamId: data.streamId,
-                        peerList: temp_peerList,
-                        timestamp: timestamp }
-                });
-                has_streamed = true;
-                callList.add(call);
-                console.log("Stream forwarded to peer with ID = ",peerId);
+        const temp_peerList = JSON.stringify(Array.from(peerList));
+        temp_list.forEach((peerId) => {
+            //Stream to peer
+            const call = peer.call(peerId, remoteStream, {
+                metadata: { id: peer.id,
+                    streamId: data.streamId,
+                    peerList: temp_peerList,
+                    timestamp: timestamp }
             });
-            if (has_streamed){
-                const conn = connections.get(peerId_bandwidth);
-                
-                    //Send forwarding message to highest bandwidth peer
-                    conn.send({type: 'forwardStream', streamId: data.streamId, peerList: temp_peerList});
-            }
+            callList.add(call);
+            console.log("Stream forwarded to peer with ID = ",peerId);
         });
+        const connection = connections.get(peerId_bandwidth);
+        //Send forwarding message to highest bandwidth peer
+        connection.send({type: 'shouldForward', peerList: temp_peerList});
     break;
     }
 }
@@ -353,7 +352,6 @@ function loadMedia() {
     const options = { audio: true, video: true };
     stream_Id = generateMessageId();
     const peerId_bandwidth = sortedPeerList.keys().next().value;
-    let has_streamed = false;
 
     // Check if there is a display surface preference and adjust options accordingly
     if (preferredDisplaySurface) {
@@ -385,25 +383,15 @@ function loadMedia() {
                             peerList: temp_peerList,
                             timestamp: new Date().getTime() }
             });
-            has_streamed = true;
             callList.add(call);
             console.log("Stream transmitted to peer with ID = ",peerId);
             streamSeen.add(stream_Id);
             isActive = true;
         });
-        if (has_streamed){
-            console.log("Connections = ",connections);
-            let temp_peerList = JSON.stringify(Array.from(sortedPeerList));
-            const conn = connections.get(peerId_bandwidth);
-            console.log("largest peer bandwidth = ",peerId_bandwidth);
-            WaitToForward = delay(200);
-            WaitToForward
-            .then(() => {
-                //Send forwarding message to highest bandwidth peer
-                conn.send({type: 'forwardStream', streamId: stream_Id, peerList: temp_peerList});
-                has_streamed = false;
-            });
-        }
+        const conn = connections.get(peerId_bandwidth);
+        //Send forwarding message to highest bandwidth peer
+        conn.send({type: 'shouldForward', peerList: temp_peerList});
+
         isHost = true;
         updateRoleIndicator();
         // Detect when the user has stopped sharing the screen
