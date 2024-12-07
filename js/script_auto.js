@@ -12,6 +12,7 @@ let starStreaming = false;
 let remoteStream;
 let timestamp;
 let stream_Id;
+let hasForwaded = false;
 
 // Initialize PeerJS
 /**
@@ -202,12 +203,17 @@ function handleIncomingData(data) {
         conn.send(connectData);
     break;
     case 'shouldForward':
+        console.log("should forward received");
         shouldForward = true;
         peerList = new Map(JSON.parse(data.peerList));
+        if (isActive && !hasForwaded){
+            handleIncomingData({type: 'forwardStream', streamId: data.streamId})
+        }
 
     break;
     case 'forwardStream':
         console.log("Time forwarding stream = ",new Date().getTime());
+        hasForwaded = true;
         let available_bandwidth = bandwidth;
         let temp_list = new Set();
         const peerId_bandwidth = peerList.keys().next().value;
@@ -220,6 +226,11 @@ function handleIncomingData(data) {
         });
         peerList.delete(peerId_bandwidth);
         const temp_peerList = JSON.stringify(Array.from(peerList));
+        if (peerId_bandwidth != null){
+            const connection = connections.get(peerId_bandwidth);
+            //Send forwarding message to highest bandwidth peer
+            connection.send({type: 'shouldForward', peerList: temp_peerList, streamId: data.streamId});
+        }
         temp_list.forEach((peerId) => {
             //Stream to peer
             const call = peer.call(peerId, remoteStream, {
@@ -231,9 +242,6 @@ function handleIncomingData(data) {
             callList.add(call);
             console.log("Stream forwarded to peer with ID = ",peerId);
         });
-        const connection = connections.get(peerId_bandwidth);
-        //Send forwarding message to highest bandwidth peer
-        connection.send({type: 'shouldForward', peerList: temp_peerList});
     break;
     }
 }
@@ -371,6 +379,9 @@ function loadMedia() {
     });
     sortedPeerList.delete(peerId_bandwidth);
     let temp_peerList = JSON.stringify(Array.from(sortedPeerList));
+    const conn = connections.get(peerId_bandwidth);
+    //Send forwarding message to highest bandwidth peer
+    conn.send({type: 'shouldForward', peerList: temp_peerList, streamId: stream_Id});
     console.log("temp_list = ",temp_list);
     navigator.mediaDevices.getDisplayMedia(options)
     .then((stream) => {
@@ -388,9 +399,6 @@ function loadMedia() {
             streamSeen.add(stream_Id);
             isActive = true;
         });
-        const conn = connections.get(peerId_bandwidth);
-        //Send forwarding message to highest bandwidth peer
-        conn.send({type: 'shouldForward', peerList: temp_peerList});
 
         isHost = true;
         updateRoleIndicator();
