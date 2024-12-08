@@ -13,6 +13,9 @@ let remoteStream;
 let timestamp;
 let stream_Id;
 let hasForwaded = false;
+let delayLog = []; // Array to store delays
+let forward_list = new Set();
+
 
 // Initialize PeerJS
 /**
@@ -24,7 +27,7 @@ let hasForwaded = false;
 function initPeer() {
     console.log("Initializing PeerJS...");
     peer = new Peer();
-    bandwidth = Math.random()*5+1;
+    bandwidth = Math.random()*2+1;
     console.log("bandwidth = ",bandwidth);
     
     peer.on('open', (id) => {
@@ -133,6 +136,11 @@ function setupStream(call) {
             const delayed = new Date().getTime() - timestamp;
             console.log("Delay = ",delayed);
             console.log("Time Received Stream = ",new Date().getTime());
+            // Log delay to in-memory array
+            delayLog.push(delayed);
+
+            // Create a downloadable text file
+            createDownloadableFile();
             if(shouldForward){
                 handleIncomingData({type: 'forwardStream', streamId: metadataStreamId})
             }
@@ -206,21 +214,14 @@ function handleIncomingData(data) {
         console.log("should forward received");
         shouldForward = true;
         peerList = new Map(JSON.parse(data.peerList));
-        if (isActive && !hasForwaded){
-            handleIncomingData({type: 'forwardStream', streamId: data.streamId})
-        }
-
-    break;
-    case 'forwardStream':
-        console.log("Time forwarding stream = ",new Date().getTime());
-        hasForwaded = true;
         let available_bandwidth = bandwidth;
-        let temp_list = new Set();
+        forward_list = new Set();
         const peerId_bandwidth = peerList.keys().next().value;
+        forward_list = new Set();
         peerList.forEach((value, key) => {
             if (available_bandwidth >= 1 && !value.isActive){
                 value.isActive = true;
-                temp_list.add(key);
+                forward_list.add(key);
                 available_bandwidth -= 1;
             }
         });
@@ -231,12 +232,24 @@ function handleIncomingData(data) {
             //Send forwarding message to highest bandwidth peer
             connection.send({type: 'shouldForward', peerList: temp_peerList, streamId: data.streamId});
         }
-        temp_list.forEach((peerId) => {
+        if (isActive && !hasForwaded){
+            handleIncomingData({type: 'forwardStream', streamId: data.streamId})
+        }
+
+    break;
+    case 'forwardStream':
+        console.log("Time forwarding stream = ",new Date().getTime());
+        hasForwaded = true;
+        const temp_peerList2 = JSON.stringify(Array.from(peerList));
+        callList.forEach((call) => {
+            call.close();
+        });
+        forward_list.forEach((peerId) => {
             //Stream to peer
             const call = peer.call(peerId, remoteStream, {
                 metadata: { id: peer.id,
                     streamId: data.streamId,
-                    peerList: temp_peerList,
+                    peerList: temp_peerList2,
                     timestamp: timestamp }
             });
             callList.add(call);
@@ -369,11 +382,11 @@ function loadMedia() {
         }
     }
     
-    temp_list = new Set();
+    forward_list = new Set();
     sortedPeerList.forEach((value, key) => {
         if (available_bandwidth >= 1){
             value.isActive = true;
-            temp_list.add(key);
+            forward_list.add(key);
             available_bandwidth -=1;
         }
     });
@@ -382,11 +395,10 @@ function loadMedia() {
     const conn = connections.get(peerId_bandwidth);
     //Send forwarding message to highest bandwidth peer
     conn.send({type: 'shouldForward', peerList: temp_peerList, streamId: stream_Id});
-    console.log("temp_list = ",temp_list);
     navigator.mediaDevices.getDisplayMedia(options)
     .then((stream) => {
         video.srcObject = stream;
-        temp_list.forEach((peerId) => {
+        forward_list.forEach((peerId) => {
             //Stream to peer
             const call = peer.call(peerId, stream, {
                 metadata: { id: peer.id,
@@ -447,4 +459,25 @@ function copyId() {
 // Utility function to create a delay
 function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+
+function createDownloadableFile() {
+    const fileContent = delayLog.join('\n'); // Convert delays to newline-separated string
+    const blob = new Blob([fileContent], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+
+    const downloadLink = document.getElementById('download-link');
+    if (downloadLink) {
+        downloadLink.href = url;
+        downloadLink.download = `delay_${peer.id}.txt`;
+    } else {
+        // Create a new download link if not existing
+        const link = document.createElement('a');
+        link.id = 'download-link';
+        link.href = url;
+        link.download = `delay_${peer.id}.txt`;
+        link.textContent = 'Download Delay Log';
+        document.body.appendChild(link);
+    }
 }
